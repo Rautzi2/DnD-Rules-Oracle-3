@@ -1,0 +1,36 @@
+.dnd-oracle-app .window-content {
+  padding: 10px;
+}
+
+.oracle-form textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.oracle-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.oracle-result {
+  margin-top: 10px;
+  padding: 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.05);
+  min-height: 20px;
+}
+
+.oracle-answer {
+  white-space: normal;
+  line-height: 1.4;
+}
+
+.oracle-error {
+  color: #a33;
+}
+
+.oracle-loading {
+  font-style: italic;
+  opacity: 0.8;
+}

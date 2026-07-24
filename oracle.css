@@ -1,0 +1,318 @@
+const MODULE_ID = "dnd-rules-oracle";
+const SOCKET = `module.${MODULE_ID}`;
+
+const EDITION_PROMPTS = {
+  "5e2014":
+    "Du beantwortest Fragen ausschließlich zu den Regeln von Dungeons & Dragons 5th Edition (2014 / 'klassische' 5e: Player's Handbook, Dungeon Master's Guide, Monster Manual von 2014 sowie deren offizielle Erweiterungen).",
+  "5e2024":
+    "Du beantwortest Fragen ausschließlich zu den Regeln von Dungeons & Dragons 5th Edition, Revision 2024 ('One D&D' / die überarbeiteten Kernregelwerke von 2024).",
+  "other":
+    "Du beantwortest Fragen zu Dungeons & Dragons. Falls die Spielgruppe Hausregeln verwendet, weise freundlich darauf hin, dass sich deine Antwort auf die offiziellen Standardregeln bezieht."
+};
+
+/** Builds the system prompt sent to Claude, based on GM-configured world settings. */
+function buildSystemPrompt() {
+  const edition = game.settings.get(MODULE_ID, "edition");
+  const extra = (game.settings.get(MODULE_ID, "systemPromptExtra") || "").trim();
+
+  let prompt =
+    `Du bist ein präzises Regel-Nachschlagewerk für Dungeons & Dragons an einem virtuellen Spieltisch (Foundry VTT). ` +
+    `${EDITION_PROMPTS[edition] || EDITION_PROMPTS["5e2014"]}\n` +
+    `Antworte kurz, klar und in strukturierter Form (kurze Absätze oder Stichpunkte). Nenne wenn möglich die einschlägige ` +
+    `Regelmechanik beim Namen (z.B. Vorteil/Nachteil, Konzentration, Gelegenheitsangriff). Wenn eine Regel Ermessensspielraum ` +
+    `für den Spielleiter lässt, mach das kenntlich. Wenn du dir bei etwas unsicher bist, sag das offen, anstatt Regeln zu erfinden. ` +
+    `Antworte auf Deutsch, außer die Frage wird auf Englisch gestellt.`;
+
+  if (extra) {
+    prompt += `\n\nZusätzlicher Kontext vom Spielleiter (z.B. Hausregeln): ${extra}`;
+  }
+  return prompt;
+}
+
+Hooks.once("init", () => {
+  game.settings.register(MODULE_ID, "apiKey", {
+    name: "Anthropic API-Key (nur Spielleiter)",
+    hint:
+      "Nur relevant für den Spielleiter-Client – hier ruft ausschließlich dieser Browser die Anthropic-API auf. " +
+      "Der Key verlässt niemals diesen Client und wird nicht an Spieler weitergegeben. Erhältlich über console.anthropic.com.",
+    scope: "client",
+    config: true,
+    type: String,
+    default: ""
+  });
+
+  game.settings.register(MODULE_ID, "model", {
+    name: "Claude-Modell",
+    hint:
+      "Nur relevant für den Spielleiter-Client. Z.B. 'claude-sonnet-5' (ausgewogen, empfohlen), " +
+      "'claude-haiku-4-5-20251001' (schneller & günstiger) oder 'claude-opus-4-8' (stärkste Reasoning-Leistung).",
+    scope: "client",
+    config: true,
+    type: String,
+    default: "claude-sonnet-5"
+  });
+
+  game.settings.register(MODULE_ID, "edition", {
+    name: "D&D-Edition",
+    hint: "Auf welches Regelwerk sich die Antworten von Claude beziehen sollen.",
+    scope: "world",
+    config: true,
+    type: String,
+    choices: {
+      "5e2014": "D&D 5e (2014)",
+      "5e2024": "D&D 5e (2024 Revision)",
+      other: "Anderes / Hausregeln"
+    },
+    default: "5e2014"
+  });
+
+  game.settings.register(MODULE_ID, "systemPromptExtra", {
+    name: "Zusätzlicher Kontext für Claude",
+    hint: "Optional: z.B. Hausregeln oder Kampagnen-Besonderheiten, die Claude bei Antworten berücksichtigen soll.",
+    scope: "world",
+    config: true,
+    type: String,
+    default: ""
+  });
+});
+
+Hooks.once("ready", () => {
+  game.socket.on(SOCKET, onSocketMessage);
+
+  const mod = game.modules.get(MODULE_ID);
+  if (mod) {
+    // Fallback entry point in case the scene control button doesn't render on some
+    // Foundry versions. Usable from a Macro: game.modules.get("dnd-rules-oracle").api.openDialog();
+    mod.api = { openDialog: () => new OracleDialog().render(true) };
+  }
+});
+
+function onSocketMessage(data) {
+  if (!data) return;
+
+  if (data.type === "ask-question") {
+    if (game.user.isGM && isRespondingGM()) handleQuestionAsGM(data);
+  } else if (data.type === "answer" || data.type === "error") {
+    if (data.targetUserId === game.user.id) {
+      Hooks.callAll(`${MODULE_ID}.response`, data);
+    }
+  }
+}
+
+/**
+ * If multiple GMs are connected at once, only one of them should call the API
+ * (to avoid duplicate calls / duplicate costs for a single question).
+ */
+function isRespondingGM() {
+  const activeGMs = game.users.filter(u => u.isGM && u.active).sort((a, b) => a.id.localeCompare(b.id));
+  return activeGMs.length > 0 && activeGMs[0].id === game.user.id;
+}
+
+async function handleQuestionAsGM(data) {
+  const apiKey = game.settings.get(MODULE_ID, "apiKey");
+
+  if (!apiKey) {
+    game.socket.emit(SOCKET, {
+      type: "error",
+      targetUserId: data.userId,
+      requestId: data.requestId,
+      message: "Der Spielleiter hat noch keinen Anthropic API-Key hinterlegt (Moduleinstellungen)."
+    });
+    return;
+  }
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: game.settings.get(MODULE_ID, "model") || "claude-sonnet-5",
+        max_tokens: 800,
+        system: buildSystemPrompt(),
+        messages: [{ role: "user", content: data.question }]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`API-Fehler (${response.status}): ${errText}`);
+    }
+
+    const json = await response.json();
+    const answer =
+      (json.content || [])
+        .filter(b => b.type === "text")
+        .map(b => b.text)
+        .join("\n")
+        .trim() || "(Keine Antwort erhalten.)";
+
+    game.socket.emit(SOCKET, {
+      type: "answer",
+      targetUserId: data.userId,
+      requestId: data.requestId,
+      question: data.question,
+      answer,
+      askerName: data.askerName
+    });
+  } catch (err) {
+    console.error(`${MODULE_ID} |`, err);
+    game.socket.emit(SOCKET, {
+      type: "error",
+      targetUserId: data.userId,
+      requestId: data.requestId,
+      message: `Fehler beim Abrufen der Antwort: ${err.message}`
+    });
+  }
+}
+
+class OracleDialog extends Application {
+  static get defaultOptions() {
+    return foundry.utils.mergeObject(super.defaultOptions, {
+      id: "dnd-oracle-dialog",
+      title: "D&D Regel-Orakel",
+      template: `modules/${MODULE_ID}/templates/ask-dialog.hbs`,
+      width: 480,
+      height: "auto",
+      resizable: true,
+      classes: ["dnd-oracle-app"]
+    });
+  }
+
+  getData() {
+    return {};
+  }
+
+  activateListeners(html) {
+    super.activateListeners(html);
+
+    const form = html.find("form")[0];
+    const questionField = html.find("#oracle-question")[0];
+    const askButton = html.find("#oracle-ask")[0];
+    const resultBox = html.find("#oracle-result")[0];
+    const postButton = html.find("#oracle-post")[0];
+
+    let currentRequestId = null;
+    let currentQuestion = "";
+    let currentAnswer = "";
+
+    const escapeHtml = str =>
+      str.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+
+    const listener = data => {
+      if (data.requestId !== currentRequestId) return;
+      askButton.disabled = false;
+      askButton.textContent = "Frage stellen";
+
+      if (data.type === "answer") {
+        currentAnswer = data.answer;
+        resultBox.innerHTML = `<p class="oracle-answer">${escapeHtml(data.answer).replace(/\n/g, "<br>")}</p>`;
+        postButton.style.display = "inline-block";
+      } else {
+        resultBox.innerHTML = `<p class="oracle-error">⚠️ ${escapeHtml(data.message)}</p>`;
+        postButton.style.display = "none";
+      }
+    };
+    Hooks.on(`${MODULE_ID}.response`, listener);
+    this._oracleListener = listener;
+
+    form.addEventListener("submit", ev => {
+      ev.preventDefault();
+      const question = questionField.value.trim();
+      if (!question) return;
+
+      currentQuestion = question;
+      currentAnswer = "";
+      currentRequestId = foundry.utils.randomID();
+
+      askButton.disabled = true;
+      askButton.textContent = "Frage wird gestellt...";
+      resultBox.innerHTML = `<p class="oracle-loading">Claude überlegt...</p>`;
+      postButton.style.display = "none";
+
+      const payload = {
+        type: "ask-question",
+        requestId: currentRequestId,
+        question,
+        userId: game.user.id,
+        askerName: game.user.name
+      };
+
+      game.socket.emit(SOCKET, payload);
+
+      // game.socket.emit does not echo back to the sender's own client, so if the
+      // asker IS the responding GM, handle the request locally too.
+      if (game.user.isGM && isRespondingGM()) {
+        handleQuestionAsGM(payload);
+      }
+
+      setTimeout(() => {
+        if (askButton.disabled && currentRequestId) {
+          askButton.disabled = false;
+          askButton.textContent = "Frage stellen";
+          if (resultBox.innerHTML.includes("Claude überlegt")) {
+            resultBox.innerHTML =
+              `<p class="oracle-error">⚠️ Keine Antwort erhalten. Ist der Spielleiter online und ist ein API-Key hinterlegt?</p>`;
+          }
+        }
+      }, 25000);
+    });
+
+    postButton.addEventListener("click", () => {
+      if (!currentAnswer) return;
+      ChatMessage.create({
+        speaker: { alias: "D&D Regel-Orakel" },
+        content:
+          `<p><strong>Frage von ${escapeHtml(game.user.name)}:</strong> ${escapeHtml(currentQuestion)}</p>` +
+          `<hr><p>${escapeHtml(currentAnswer).replace(/\n/g, "<br>")}</p>`
+      });
+    });
+  }
+
+  close(options) {
+    if (this._oracleListener) Hooks.off(`${MODULE_ID}.response`, this._oracleListener);
+    return super.close(options);
+  }
+}
+
+Hooks.on("getSceneControlButtons", controls => {
+  const tool = {
+    name: "ask-oracle",
+    title: "D&D Regel-Orakel öffnen",
+    icon: "fa-solid fa-scroll",
+    button: true,
+    onClick: () => new OracleDialog().render(true),
+    onChange: () => new OracleDialog().render(true) // Foundry v13 compatibility
+  };
+
+  if (Array.isArray(controls)) {
+    // Foundry v11 / v12 format: controls is an array of groups.
+    let group = controls.find(c => c.name === MODULE_ID);
+    if (!group) {
+      group = {
+        name: MODULE_ID,
+        title: "D&D Regel-Orakel",
+        icon: "fa-solid fa-scroll",
+        layer: "controls",
+        tools: []
+      };
+      controls.push(group);
+    }
+    group.tools.push(tool);
+  } else if (controls && typeof controls === "object") {
+    // Foundry v13+ format: controls is an object keyed by group name.
+    controls[MODULE_ID] = {
+      name: MODULE_ID,
+      title: "D&D Regel-Orakel",
+      icon: "fa-solid fa-scroll",
+      layer: "controls",
+      visible: true,
+      tools: { [tool.name]: tool },
+      activeTool: tool.name
+    };
+  }
+});
