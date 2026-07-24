@@ -12,4 +12,7 @@
   ],
   "esmodules": ["scripts/oracle.js"],
   "styles": ["styles/oracle.css"]
+},
+"manifest": "https://githubusercontent.com"
+"download": "https://github.com"
 }
