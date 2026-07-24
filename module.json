@@ -1,5 +1,5 @@
 {
-  "id": "dnd-rules-oracle",
+  "id": "dnd-rules-oracle-3",
   "title": "D&D Regel-Orakel (Claude)",
   "description": "Spieler und Spielleiter können direkt im Spiel Fragen zum D&D-Regelwerk stellen. Beantwortet von Claude (Anthropic) – der API-Aufruf erfolgt ausschließlich über den Client des Spielleiters, sodass der API-Key nie an Spieler-Clients weitergegeben wird.",
   "version": "1.0.0",
