@@ -1,29 +1,17 @@
-[
-  {
-    "id": "dnd-rules-oracle",
-    "title": "D&D Regel-Orakel (Claude)",
-    "description": "Spieler und Spielleiter können direkt im Spiel Fragen zum D&D-Regelwerk stellen. Beantwortet von Claude (Anthropic) – der API-Aufruf erfolgt ausschließlich über den Client des Spielleiters, sodass der API-Key nie an Spieler-Clients weitergegeben wird.",
-    "version": "1.0.0",
-    "compatibility": {
-      "minimum": "11",
-      "verified": "13"
-    },
-    "authors": [
-      {
-        "name": "Tim"
-      }
-    ],
-    "esmodules": [
-      "scripts/oracle.js"
-    ],
-    "styles": [
-      "styles/oracle.css"
-    ]
+{
+  "id": "dnd-rules-oracle",
+  "title": "D&D Regel-Orakel (Claude)",
+  "description": "Spieler und Spielleiter können direkt im Spiel Fragen zum D&D-Regelwerk stellen. Beantwortet von Claude (Anthropic) – der API-Aufruf erfolgt ausschließlich über den Client des Spielleiters, sodass der API-Key nie an Spieler-Clients weitergegeben wird.",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "11",
+    "verified": "13"
   },
-  "manifest",
-  ":",
-  "https://githubusercontent.com",
-  "download",
-  ":",
-  "https://github.com"
-]
+  "authors": [
+    { "name": "Tim" }
+  ],
+  "esmodules": ["scripts/oracle.js"],
+  "styles": ["styles/oracle.css"],
+   "manifest": "https://githubusercontent.com", 
+   "download": "https://github.com"
+}
