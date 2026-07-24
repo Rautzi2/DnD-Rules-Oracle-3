@@ -12,6 +12,6 @@
   ],
   "esmodules": ["scripts/oracle.js"],
   "styles": ["styles/oracle.css"],
-   "manifest": "https://raw.githubusercontent.com/Rautzi2/DnD-Rules-Oracle-3/refs/heads/main/module.json", 
+   "manifest": "https://githubusercontent.com", 
    "download": "https://github.com"
 }
